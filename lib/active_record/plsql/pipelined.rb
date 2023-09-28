@@ -111,15 +111,19 @@ module ActiveRecord::PLSQL
         # Always select arguments of first function (overloading not supported)
         arguments_metadata = pipelined_function.arguments[0].sort_by {|arg| arg[1][:position]}
         arguments_metadata.map do |name, argument|
-          ActiveRecord::ConnectionAdapters::OracleEnhancedColumn.new(
-            name.to_s, nil, connection.fetch_type_metadata(argument[:data_type]), pipelined_function_name
+          ActiveRecord::ConnectionAdapters::OracleEnhanced::Column.new(
+            name.to_s, nil, fetch_type_metadata(argument[:data_type]), pipelined_function_name
           )
         end
       end
 
+      def fetch_type_metadata(sql_type, virtual = nil)
+        ActiveRecord::ConnectionAdapters::OracleEnhanced::TypeMetadata.new(sql_type)
+      end
+
       def relation
         return super unless pipelined?
-        @relation ||= PipelinedRelation.new(self, arel_table, predicate_builder)
+        @relation ||= PipelinedRelation.new(self, table: arel_table, predicate_builder: predicate_builder)
       end
     end
 

@@ -1,5 +1,7 @@
 module ActiveRecord::PLSQL
   class PipelinedRelation < ActiveRecord::Relation
+    include ActiveRecord::PLSQL::Pipelined::ClassMethods
+
     class FromClause < ActiveRecord::Relation::FromClause
       def initialize(value, name, binds = nil)
         super(value, name)
