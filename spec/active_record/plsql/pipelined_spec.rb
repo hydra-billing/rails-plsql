@@ -35,7 +35,7 @@ RSpec.describe ActiveRecord::PLSQL::Pipelined do
     it 'should returns pipelined function arguments' do
       User.pipelined_function = 'users_pkg.find_users_by_name'
       expect(User.pipelined_arguments).to be_an Array
-      expect(User.pipelined_arguments.first).to be_an ActiveRecord::ConnectionAdapters::OracleEnhancedColumn
+      expect(User.pipelined_arguments.first).to be_an ActiveRecord::ConnectionAdapters::OracleEnhanced::Column
       expect(User.pipelined_arguments.map(&:name)).to eql(%w(p_name))
 
       expect(User.columns.map(&:name)).to eql(%w(id name surname country p_name))
