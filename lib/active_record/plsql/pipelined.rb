@@ -22,7 +22,7 @@ module ActiveRecord::PLSQL
 
     module ClassMethods
       def pipelined_arguments
-        raise PipelinedFunctionError, "Pipelined function didn't set" unless pipelined?
+        raise PipelinedFunctionError, "Pipelined function wasn't set" unless pipelined?
         @pipelined_arguments ||= get_pipelined_arguments
       end
 
