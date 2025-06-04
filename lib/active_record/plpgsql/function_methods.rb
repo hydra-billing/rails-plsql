@@ -65,7 +65,7 @@ module ActiveRecord::PLPGSQL
       end
 
       def function_method(method, function_name = method, options = {}, &block)
-        function = if ::PLPGSQL::Function === function_name
+        function = if ::PLPGSQL::Routine === function_name
           function_name
         else
           find_function(function_name)
@@ -100,10 +100,10 @@ module ActiveRecord::PLPGSQL
             plpgsql.send(package.to_sym)[function.to_sym]
           in [function]
             if function_schema
-              function_schema[function] || ::PLPGSQL::Function.find(
+              function_schema[function] || ::PLPGSQL::Routine.find(
                 plpgsql,
                 schema_name: function_schema.name,
-                function_name: function
+                routine_name: function
               )
             else
               raise ArgumentError, "Function (%s) not found" % function_name

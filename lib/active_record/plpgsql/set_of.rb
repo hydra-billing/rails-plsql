@@ -62,7 +62,7 @@ module ActiveRecord::PLPGSQL
 
         @set_of_function = set_of_function
         @set_of_arguments = nil
-        @table_name = set_of_function_name if @set_of_function
+        # @table_name = set_of_function_name if @set_of_function
       end
 
       def set_of_function_name
