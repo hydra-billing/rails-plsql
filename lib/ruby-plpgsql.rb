@@ -1,9 +1,18 @@
 class PLPGSQL
+  class ArgumentHandler
+    def call(_routine, arg)
+      arg
+    end
+  end
+
   attr_writer :activerecord_class
+
+  attr_accessor :argument_handler
 
   def initialize(activerecord_class = nil)
     @activerecord_class = activerecord_class
     @cache = {}
+    @argument_handler = ArgumentHandler.new
   end
 
   class Schema
@@ -11,7 +20,7 @@ class PLPGSQL
 
     alias name schema_name
 
-    def initialize(ar_class:, schema_name:)
+    def initialize(ar_class:, schema_name:, argument_handler:)
       @ar_class = ar_class
       @schema_name =
         case schema_name
@@ -24,6 +33,7 @@ class PLPGSQL
         end
       @cache = {}
       @name_cache = {}
+      @argument_handler = argument_handler
     end
 
     def [](function_name)
@@ -49,19 +59,22 @@ class PLPGSQL
         Procedure.new(
           ar_class: @ar_class,
           schema_name: @schema_name,
-          routine_name: name
+          routine_name: name,
+          argument_handler: @argument_handler
         )
       when 'FUNCTION'
         Function.new(
           ar_class: @ar_class,
           schema_name: @schema_name,
-          routine_name: name
+          routine_name: name,
+          argument_handler: @argument_handler
         )
       else
         UnknownRoutine.new(
           ar_class: @ar_class,
           schema_name: @schema_name,
-          routine_name: name
+          routine_name: name,
+          argument_handler: @argument_handler
         )
       end
     end
@@ -80,10 +93,11 @@ class PLPGSQL
       plpgsql.public_send(schema_name)[routine_name]
     end
 
-    def initialize(ar_class:, schema_name:, routine_name:)
+    def initialize(ar_class:, schema_name:, routine_name:, argument_handler:)
       @ar_class = ar_class
       @schema_name = schema_name
       @routine_name = routine_name
+      @argument_handler = argument_handler
     end
 
     def schema_name
@@ -109,7 +123,8 @@ class PLPGSQL
       args.flat_map do |arg|
         if arg.is_a?(::Hash)
           arg.map do |key, value|
-            "#{key} => #{value_to_string(value)}"
+            arg_name = @argument_handler.call(self, key)
+            "#{arg_name} => #{value_to_string(value)}"
           end
         else
           [value_to_string(arg)]
@@ -159,7 +174,8 @@ class PLPGSQL
   def method_missing(schema_name)
     @cache[schema_name] ||= Schema.new(
       ar_class: @activerecord_class,
-      schema_name: schema_name
+      schema_name: schema_name,
+      argument_handler: @argument_handler
     )
   end
 end
