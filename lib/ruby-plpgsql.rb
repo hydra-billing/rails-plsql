@@ -47,33 +47,40 @@ class PLPGSQL
     end
 
     def resolve_routine(name)
-      routine_type = @ar_class.connection.select_value(<<-SQL)
-        SELECT routine_type
+      routine_info = @ar_class.connection.select_one(<<-SQL)
+        SELECT routine_type, specific_name
         FROM information_schema.routines
         WHERE routine_schema = '#{@schema_name.to_s.downcase}'
         AND routine_name = '#{normalize_function_name(name)}'
       SQL
 
-      case routine_type
-      when 'PROCEDURE'
-        Procedure.new(
-          ar_class: @ar_class,
-          schema_name: @schema_name,
-          routine_name: name,
-          argument_handler: @argument_handler
-        )
-      when 'FUNCTION'
-        Function.new(
-          ar_class: @ar_class,
-          schema_name: @schema_name,
-          routine_name: name,
-          argument_handler: @argument_handler
-        )
+      if routine_info
+        case routine_info['routine_type']
+        when 'PROCEDURE'
+          Procedure.new(
+            ar_class: @ar_class,
+            schema_name: @schema_name,
+            routine_name: name,
+            specific_name: routine_info['specific_name'],
+            argument_handler: @argument_handler
+          )
+        when 'FUNCTION'
+          Function.new(
+            ar_class: @ar_class,
+            schema_name: @schema_name,
+            routine_name: name,
+            specific_name: routine_info['specific_name'],
+            argument_handler: @argument_handler
+          )
+        else
+          raise "Unknown routine type: #{routine_info['routine_type']}"
+        end
       else
-        UnknownRoutine.new(
+        MissingRoutine.new(
           ar_class: @ar_class,
           schema_name: @schema_name,
           routine_name: name,
+          specific_name: nil,
           argument_handler: @argument_handler
         )
       end
@@ -93,10 +100,11 @@ class PLPGSQL
       plpgsql.public_send(schema_name)[routine_name]
     end
 
-    def initialize(ar_class:, schema_name:, routine_name:, argument_handler:)
+    def initialize(ar_class:, schema_name:, routine_name:, specific_name:, argument_handler:)
       @ar_class = ar_class
       @schema_name = schema_name
       @routine_name = routine_name
+      @specific_name = specific_name
       @argument_handler = argument_handler
     end
 
@@ -117,26 +125,109 @@ class PLPGSQL
       false
     end
 
+    def arguments
+      @arguments ||= get_argument_metadata
+    end
+
+    def argument_list
+      @argument_list ||= begin
+        args = arguments[0] || {}
+        args.keys.sort { |k1, k2| args[k1][:position] <=> args[k2][:position] }
+      end
+    end
+
+    def out_list
+      @out_list ||= begin
+        args = arguments[0] || {}
+        argument_list.select { |k| args[k][:in_out] =~ /OUT/ }
+      end
+    end
+
     private
 
+    def get_argument_metadata
+      # Build hash similar to Oracle's structure, but without overloading
+      args = {}
+
+      @ar_class.connection.select_all(<<-SQL).each do |row|
+          SELECT
+            parameter_name,
+            data_type,
+            parameter_mode,
+            ordinal_position,
+            parameter_default,
+            character_maximum_length,
+            numeric_precision,
+            numeric_scale
+          FROM information_schema.parameters
+          WHERE specific_schema = '#{@schema_name.to_s.downcase}'
+          AND specific_name = '#{@specific_name}'
+          AND parameter_name IS NOT NULL
+          ORDER BY ordinal_position
+        SQL
+
+        param_name = row['parameter_name']&.downcase&.to_sym
+        next unless param_name
+
+        args[param_name] = {
+          position: row['ordinal_position'].to_i,
+          data_type: row['data_type'],
+          in_out: case row['parameter_mode']
+                  when 'IN' then 'IN'
+                  when 'OUT' then 'OUT'
+                  when 'INOUT' then 'IN OUT'
+                  else 'IN'
+                  end,
+          data_length: row['character_maximum_length']&.to_i,
+          data_precision: row['numeric_precision']&.to_i,
+          data_scale: row['numeric_scale']&.to_i,
+          defaulted: row['parameter_default'] ? 'Y' : 'N'
+        }
+      end
+
+      # Return hash with overload key 0 to match Oracle structure
+      { 0 => args }
+    end
+
     def args_to_string(args)
-      args.flat_map do |arg|
-        if arg.is_a?(::Hash)
-          arg.map do |key, value|
-            arg_name = @argument_handler.call(self, key)
-            "#{arg_name} => #{value_to_string(value)}"
+      [
+        *args.flat_map { |arg|
+          if arg.is_a?(::Hash)
+            arg.map do |key, value|
+              arg_name = @argument_handler.call(self, key)
+              "#{arg_name} => #{value_to_string(value)}"
+            end
+          else
+            [value_to_string(arg)]
           end
-        else
-          [value_to_string(arg)]
-        end
-      end.join(', ')
+        },
+        *out_args
+      ].join(', ')
+    end
+
+    def out_args
+      @out_args ||= begin
+        args = arguments[0] || {}
+        argument_list.select { |k| args[k][:in_out] =~ /OUT/ }.map { |k|
+          arg_name = @argument_handler.call(self, k)
+          "#{arg_name} => NULL"
+        }
+      end
     end
 
     def value_to_string(value)
       if value.is_a?(::String)
-        "'#{value}'"
+        if value.empty?
+          "NULL"
+        else
+          "'#{value}'"
+        end
+      elsif value.is_a?(::Array)
+        "'{#{value.join(', ')}}'"
       elsif value.nil?
         'null'
+      elsif value.is_a?(::Time) || value.is_a?(::DateTime)
+        "'#{value.strftime('%Y-%m-%d %H:%M:%S')}'::timestamp(0)"
       else
         value.to_s
       end
@@ -145,9 +236,27 @@ class PLPGSQL
 
   class Function < Routine
     def call(*args, &_block)
-      @ar_class.connection.select_value(
-        "select #{@schema_name}.#{name}(#{args_to_string(args)})"
-      )
+      if set_of?
+        @ar_class.connection.select_all(
+          "select #{@schema_name}.#{name}(#{args_to_string(args)})"
+        ).to_a
+      else
+        @ar_class.connection.select_value(
+          "select #{@schema_name}.#{name}(#{args_to_string(args)})"
+        )
+      end
+    end
+
+    def set_of?
+      if defined?(@set_of)
+        @set_of
+      else
+        # determine if the function returns a set of rows
+        # by checking the return type
+        @set_of = @ar_class.connection.select_value(
+          "SELECT pg_get_function_result(oid) FROM pg_proc WHERE proname = '#{@routine_name}'"
+        ) =~ /setof/i
+      end
     end
   end
 
@@ -155,13 +264,13 @@ class PLPGSQL
     def call(*args, &_block)
       @ar_class.connection.execute(
         "call #{@schema_name}.#{name}(#{args_to_string(args)})"
-      )
+      ).to_a.first
     end
   end
 
-  class UnknownRoutine < Routine
+  class MissingRoutine < Routine
     def call(*args, &_block)
-      raise "Unknown routine: #{@schema_name}.#{@routine_name}"
+      raise "Missing routine: #{@schema_name}.#{@routine_name}"
     end
   end
 

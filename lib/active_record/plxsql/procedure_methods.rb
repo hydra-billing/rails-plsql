@@ -30,6 +30,16 @@ module ActiveRecord::PLXSQL
       def procedure_method(*args, **kwargs, &block)
         function_method(*args, **kwargs, &block)
       end
+
+      def procedure_methods
+        function_methods
+      end
+
+      def procedures_arguments
+        functions_arguments
+      end
     end
+
+    delegate :procedures_arguments, :procedure_methods, to: 'self.class'
   end
 end

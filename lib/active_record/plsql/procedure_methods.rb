@@ -74,7 +74,7 @@ module ActiveRecord::PLSQL
         # Raise error if procedure not found
         raise ArgumentError, "Procedure (%s) not found for method (%s)" % [procedure_name, method] unless procedure
 
-        procedure_methods[method] = {procedure: procedure, options: options, block: block}
+        procedure_methods[method] = {routine: procedure, options: options, block: block}
 
         unless (instance_methods + private_instance_methods).find {|m| m == method}
           @generated_attribute_methods.class_eval(<<-RUBY, __FILE__, __LINE__ + 1)
@@ -115,7 +115,7 @@ module ActiveRecord::PLSQL
     private
 
       def call_procedure_method(method, arguments = {}, opts = {})
-        procedure, options, block = procedure_methods[method].values_at(:procedure, :options, :block)
+        procedure, options, block = procedure_methods[method].values_at(:routine, :options, :block)
         options = options.merge(opts)
 
         if options[:arguments]

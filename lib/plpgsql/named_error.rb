@@ -3,9 +3,11 @@ class PLPGSQL
     class_attribute :error_code, instance_writer: false
 
     class << self
+      CLASS_NAME=  /PG::RaiseException|PG::ServerError/
+
       def ===(error)
         if error.respond_to?(:message)
-          error.message.start_with?("PG::RaiseException") &&
+          error.message.start_with?(CLASS_NAME) &&
             error.message.include?("ERROR:  [#{error_code}]")
         else
           false

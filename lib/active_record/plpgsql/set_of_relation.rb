@@ -18,6 +18,11 @@ module ActiveRecord::PLPGSQL
       end
     end
 
+    def initialize(...)
+      super
+      @set_of_function = klass.set_of_function
+    end
+
     attr_accessor :set_of_arguments_values
 
     def where(opts, *rest)

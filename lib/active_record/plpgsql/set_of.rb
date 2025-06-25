@@ -84,7 +84,7 @@ module ActiveRecord::PLPGSQL
 
       def set_of_function_alias
         # GET_USER_BY_NAME => GUBN
-        @set_of_function.procedure.scan(/^\w|_\w/).join('').gsub('_', '')
+        @set_of_function.routine_name.scan(/^\w|_\w/).join('').gsub('_', '')
       end
 
       def table_name_with_arguments
@@ -107,14 +107,15 @@ module ActiveRecord::PLPGSQL
 
       private
 
-      def get_setof_arguments
+      def get_set_of_arguments
         # Always select arguments of first function (overloading not supported)
         arguments_metadata = set_of_function.arguments[0].sort_by {|arg| arg[1][:position]}
-        arguments_metadata.map do |name, argument|
-          ActiveRecord::ConnectionAdapters::OracleEnhanced::Column.new(
-            name.to_s, nil, fetch_type_metadata(argument[:data_type]), set_of_function_name
-          )
-        end
+        arguments_metadata.map(&:first)
+        # arguments_metadata.map do |name, argument|
+        #   ActiveRecord::ConnectionAdapters::PostgreSQLAdapter::Column.new(
+        #     name.to_s, nil, fetch_type_metadata(argument[:data_type]), set_of_function_name
+        #   )
+        # end
       end
 
       def fetch_type_metadata(sql_type, virtual = nil)

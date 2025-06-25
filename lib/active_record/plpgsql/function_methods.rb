@@ -74,7 +74,7 @@ module ActiveRecord::PLPGSQL
         # Raise error if procedure not found
         raise ArgumentError, "Function (%s) not found for method (%s)" % [function_name, method] unless function
 
-        function_methods[method] = {function: function, options: options, block: block}
+        function_methods[method] = {routine: function, options: options, block: block}
 
         unless (instance_methods + private_instance_methods).find {|m| m == method}
           @generated_attribute_methods.class_eval(<<-RUBY, __FILE__, __LINE__ + 1)
@@ -117,7 +117,7 @@ module ActiveRecord::PLPGSQL
     private
 
       def call_function_method(method, arguments = {}, opts = {})
-        function, options, block = function_methods[method].values_at(:function, :options, :block)
+        function, options, block = function_methods[method].values_at(:routine, :options, :block)
         options = options.merge(opts)
 
         if options[:arguments]
@@ -133,7 +133,7 @@ module ActiveRecord::PLPGSQL
       end
 
       def call_function(function, options = {})
-        result = function.exec(*get_function_arguments(function, options))
+        result = function.(*get_function_arguments(function, options))
         if block_given?
           yield(self, result)
         else
@@ -147,7 +147,7 @@ module ActiveRecord::PLPGSQL
 
         if Hash === arguments
           arguments.symbolize_keys!
-          arguments_metadata = procedures_arguments[procedure]
+          arguments_metadata = procedures_arguments[function]
           # throw away unnecessary arguments
           [arguments.select {|k,_| arguments_metadata[k]}]
         else
