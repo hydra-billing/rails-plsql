@@ -1,9 +1,8 @@
 module ActiveRecord::PLSQL
   module PipelinedScope
     def last_chain_scope(scope, reflection, owner)
-      join_keys = reflection.join_keys
-      key = join_keys.key
-      foreign_key = join_keys.foreign_key
+      key = reflection.join_primary_key
+      foreign_key = reflection.join_foreign_key
 
       table = reflection.aliased_table
       value = scope.klass.pipelined? ? owner[foreign_key] : transform_value(owner[foreign_key])
