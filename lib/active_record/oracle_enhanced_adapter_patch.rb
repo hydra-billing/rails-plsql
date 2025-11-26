@@ -60,7 +60,7 @@ module ActiveRecord
       protected
 
       def translate_exception(exception, message) #:nodoc:
-        case @connection.error_code(exception)
+        case @raw_connection.error_code(exception)
         when 1
           RecordNotUnique.new(message, exception)
         when 2291
