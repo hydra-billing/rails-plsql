@@ -18,14 +18,14 @@ class PLPGSQL
         exception = "Error occurred: %s\n%s" %
           [event.payload[:error].class, event.payload[:error].message.split("\n").map{|l| "  #{l}"}.join("\n")]
 
-        name = color(name, RED, true)
-        exception = color(exception, RED, true)
-        sql = color(sql, nil, true)
+        name = color(name, RED, bold: true)
+        exception = color(exception, RED, bold: true)
+        sql = color(sql, nil, bold: true)
 
         error "  #{name}  #{sql}#{arguments}\n  #{exception}"
       else
-        name = color(name, YELLOW, true)
-        sql = color(sql, nil, true)
+        name = color(name, YELLOW, bold: true)
+        sql = color(sql, nil, bold: true)
 
         debug "  #{name}  #{sql}#{arguments}"
       end
