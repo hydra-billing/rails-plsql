@@ -93,6 +93,14 @@ module ActiveRecord::PLPGSQL
         )
       end
 
+      def column_names
+        if set_of?
+          set_of_function.columns.map(&:name)
+        else
+          super
+        end
+      end
+
       def table_exist?
         set_of? || super
       end

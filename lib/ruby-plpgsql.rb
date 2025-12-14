@@ -258,6 +258,89 @@ class PLPGSQL
         ) =~ /setof/i
       end
     end
+
+    def columns
+      if set_of?
+        # get return type of the function
+        return_type = @ar_class.connection.select_value(<<-SQL).downcase
+          SELECT pg_get_function_result(oid) FROM pg_proc WHERE proname = '#{@routine_name}'
+        SQL
+
+        # Check if it's SETOF RECORD or SETOF specific_type
+        if return_type =~ /^setof record$/i
+          # For SETOF RECORD, get columns from function parameters (OUT params or RETURNS TABLE)
+          result = @ar_class.connection.select_all(<<-SQL)
+            SELECT
+              parameter_name,
+              data_type,
+              ordinal_position,
+              parameter_mode
+            FROM information_schema.parameters
+            WHERE specific_schema = '#{@schema_name.to_s.downcase}'
+            AND specific_name = '#{@specific_name}'
+            AND parameter_mode IN ('OUT', 'INOUT', 'TABLE')
+            ORDER BY ordinal_position
+          SQL
+
+          result.map do |row|
+            name = row['parameter_name']
+            type = row['data_type']
+
+            # Create a simple column-like object with name and type
+            OpenStruct.new(
+              name: name,
+              type: type,
+              sql_type: type
+            )
+          end
+        else
+          # For SETOF specific_type, extract the type name and query its attributes
+          type_match = return_type.match(/^setof ([\w\.]+)/)
+          if type_match
+            type_name = type_match[1]
+
+            # Check if type includes schema
+            if type_name.include?('.')
+              schema, table = type_name.split('.', 2)
+            else
+              # Use the function's schema as default
+              schema = @schema_name.to_s.downcase
+              table = type_name
+            end
+
+            # Query composite type attributes from pg_type and pg_attribute
+            # This works for both custom composite types and table types
+            result = @ar_class.connection.select_all(<<-SQL)
+              SELECT
+                a.attname AS name,
+                format_type(a.atttypid, a.atttypmod) AS sql_type,
+                pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+                a.attnum AS position
+              FROM pg_type t
+              JOIN pg_namespace n ON t.typnamespace = n.oid
+              JOIN pg_attribute a ON a.attrelid = t.typrelid
+              WHERE n.nspname = '#{schema}'
+              AND t.typname = '#{table}'
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+              ORDER BY a.attnum
+            SQL
+
+            result.map do |row|
+              OpenStruct.new(
+                name: row['name'],
+                type: row['data_type'],
+                sql_type: row['sql_type']
+              )
+            end
+          else
+            []
+          end
+        end
+      else
+        nil
+      end
+    end
   end
 
   class Procedure < Routine
