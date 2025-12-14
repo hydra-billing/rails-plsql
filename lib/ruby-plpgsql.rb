@@ -143,6 +143,10 @@ class PLPGSQL
       end
     end
 
+    def defined?
+      true
+    end
+
     private
 
     def get_argument_metadata
@@ -352,8 +356,16 @@ class PLPGSQL
   end
 
   class MissingRoutine < Routine
+    def defined?
+      false
+    end
+
     def call(*args, &_block)
       raise "Missing routine: #{@schema_name}.#{@routine_name}"
+    end
+
+    def to_s
+      "PLPGSQL::MissingRoutine(#{@schema_name}.#{@routine_name})"
     end
   end
 

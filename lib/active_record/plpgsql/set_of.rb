@@ -95,7 +95,11 @@ module ActiveRecord::PLPGSQL
 
       def column_names
         if set_of?
-          set_of_function.columns.map(&:name)
+          if set_of_function.defined?
+            set_of_function.columns.map(&:name)
+          else
+            raise "Set of function not found: #{set_of_function.to_s}"
+          end
         else
           super
         end
@@ -103,7 +107,11 @@ module ActiveRecord::PLPGSQL
 
       def columns_hash
         if set_of?
-          set_of_function.columns.to_h { |col| [col.name, col] }
+          if set_of_function.defined?
+            set_of_function.columns.to_h { |col| [col.name, col] }
+          else
+            raise "Set of function not found: #{set_of_function.to_s}"
+          end
         else
           super
         end
