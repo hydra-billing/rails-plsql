@@ -101,6 +101,14 @@ module ActiveRecord::PLPGSQL
         end
       end
 
+      def columns_hash
+        if set_of?
+          set_of_function.columns.to_h { |col| [col.name, col] }
+        else
+          super
+        end
+      end
+
       def table_exist?
         set_of? || super
       end
