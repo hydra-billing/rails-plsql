@@ -205,17 +205,18 @@ class PLPGSQL
             [value_to_string(arg)]
           end
         },
-        *out_args
+        *out_args(args[0])
       ].join(', ')
     end
 
-    def out_args
-      @out_args ||= begin
-        args = arguments[0] || {}
-        argument_list.select { |k| args[k][:in_out] =~ /OUT/ }.map { |k|
-          arg_name = @argument_handler.call(self, k)
-          "#{arg_name} => NULL"
-        }
+    def out_args(in_args)
+      args = arguments[0] || {}
+      argument_list.select { |k|
+        args[k][:in_out].end_with?('OUT') &&
+          !in_args.is_a?(Hash) && !in_args.include?(k)
+      }.map do |k|
+        arg_name = @argument_handler.call(self, k)
+        "#{arg_name} => NULL"
       end
     end
 
