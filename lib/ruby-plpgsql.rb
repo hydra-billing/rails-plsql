@@ -34,13 +34,32 @@ class PLPGSQL
       @cache = {}
       @name_cache = {}
       @argument_handler = argument_handler
+      check_schema_exists
     end
 
     def [](function_name)
-      @cache[normalize_function_name(function_name)] ||= resolve_routine(function_name)
+      normalized_function_name = normalize_function_name(function_name)
+
+      if @cache.key?(normalized_function_name)
+        @cache[normalized_function_name]
+      else
+        @cache[normalized_function_name] = resolve_routine(normalized_function_name)
+      end
     end
 
     private
+
+    def check_schema_exists
+      exists = @ar_class.connection.select_value(<<-SQL)
+        SELECT EXISTS(
+          SELECT 1 FROM information_schema.schemata WHERE schema_name = '#{@schema_name.to_s.downcase}'
+        )
+      SQL
+
+      unless exists
+        raise ArgumentError, "Schema #{@schema_name} does not exist"
+      end
+    end
 
     def normalize_function_name(name)
       @name_cache[name] ||= name.to_s.downcase
