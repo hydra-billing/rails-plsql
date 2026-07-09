@@ -1,6 +1,7 @@
 if RUBY_ENGINE == 'ruby'
   require 'oci8'
 end
+require 'logger'
 require 'active_record'
 require 'activerecord-oracle_enhanced-adapter'
 require 'ruby-plsql'

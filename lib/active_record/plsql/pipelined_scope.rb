@@ -16,7 +16,27 @@ module ActiveRecord::PLSQL
 
       scope
     end
+
+    def apply_scope(scope, table, key, value)
+      if scope.klass.respond_to?(:pipelined?) && scope.klass.pipelined?
+        pipelined_args = scope.klass.pipelined_arguments_names.map(&:to_sym)
+        return scope.where!(key => value) if pipelined_args.include?(key.to_sym)
+      end
+
+      super
+    end
+  end
+
+  module PipelinedAssociationStatementCache
+    private
+
+    def skip_statement_cache?(scope)
+      return true if klass.respond_to?(:pipelined?) && klass.pipelined?
+
+      super
+    end
   end
 end
 
 ActiveRecord::Associations::AssociationScope.prepend(ActiveRecord::PLSQL::PipelinedScope)
+ActiveRecord::Associations::Association.prepend(ActiveRecord::PLSQL::PipelinedAssociationStatementCache)

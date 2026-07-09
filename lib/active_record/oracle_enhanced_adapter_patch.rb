@@ -2,11 +2,14 @@ require 'active_record/connection_adapters/oracle_enhanced_adapter'
 require 'plsql/pipelined_function'
 
 class ActiveRecord::StatementInvalid
-  attr_reader :original_exception
+  attr_reader :original_exception, :sql, :binds, :connection_pool
 
-  def initialize(message, original_exception)
-    @original_exception = original_exception
+  def initialize(message = nil, original_exception = nil, sql: nil, binds: nil, connection_pool: nil)
     super(message)
+    @original_exception = original_exception
+    @sql = sql
+    @binds = binds
+    @connection_pool = connection_pool
   end
 end
 
@@ -35,7 +38,16 @@ module ActiveRecord
             OracleEnhanced::Column.new(arg_name.to_s, nil, fetch_type_metadata(argument[:data_type]), table)
           end
 
-          return_columns = function.return[:element][:fields].sort_by {|col_name, col| col[:position]}.map do |col_name, metadata|
+          element = function.return && function.return[:element]
+          unless element && element[:fields]
+            raise "Pipelined function '#{function_name}' return type metadata is incomplete: " \
+                  ":element is nil or missing :fields. This may be caused by Oracle 18c+ " \
+                  "composite type metadata changes. Ensure ruby-plsql is up to date, " \
+                  "or check that ALL_PLSQL_COLL_TYPES / ALL_PLSQL_TYPE_ATTRS contain " \
+                  "the type definition for #{function.return && function.return[:type_name]}."
+          end
+
+          return_columns = element[:fields].sort_by {|col_name, col| col[:position]}.map do |col_name, metadata|
             metadata.merge(name: col_name)
           end
 
@@ -59,16 +71,28 @@ module ActiveRecord
 
       protected
 
-      def translate_exception(exception, message) #:nodoc:
-        case @connection.error_code(exception)
+      def translate_exception(exception, message = nil, sql: nil, binds: nil, connection_pool: nil, **kwargs)
+        # Rails 7.2 adapter exposes _connection (private) which returns OCIConnection with error_code;
+        # older adapters used @connection ivar. _connection is private, so
+        # respond_to? needs the `true` flag to find it.
+        conn = if respond_to?(:_connection, true)
+          _connection
+        else
+          @connection
+        end
+
+        # Normalize message: positional arg (older Rails) OR keyword message (Rails 7.2)
+        message ||= kwargs.delete(:message) || exception.message
+
+        case conn.error_code(exception)
         when 1
-          RecordNotUnique.new(message, exception)
+          RecordNotUnique.new(message, exception, sql: sql, binds: binds, connection_pool: connection_pool)
         when 2291
-          InvalidForeignKey.new(message, exception)
+          InvalidForeignKey.new(message, exception, sql: sql, binds: binds, connection_pool: connection_pool)
         when 20000..20999 # Skip user-defined errors
           raise
         else
-          ActiveRecord::StatementInvalid.new(message, exception)
+          StatementInvalid.new(message, exception, sql: sql, binds: binds, connection_pool: connection_pool)
         end
       end
 
