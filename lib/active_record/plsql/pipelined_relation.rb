@@ -210,3 +210,11 @@ module ActiveRecord::PLSQL
     end
   end
 end
+
+# PipelinedRelation is instantiated directly instead of through
+# Delegation#relation_class_for, so it never gets the per-model delegate class that
+# Rails builds for ordinary relations. Without this, model scopes and class methods
+# are not reachable from a pipelined relation.
+unless ActiveRecord::PLSQL::PipelinedRelation < ActiveRecord::Delegation::ClassSpecificRelation
+  ActiveRecord::PLSQL::PipelinedRelation.include(ActiveRecord::Delegation::ClassSpecificRelation)
+end

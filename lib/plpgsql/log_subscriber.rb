@@ -1,0 +1,46 @@
+class PLPGSQL
+  class LogSubscriber < ActiveSupport::LogSubscriber
+    def procedure_call(event)
+      return unless logger && (logger.debug? || uncaught_exception?(event.payload[:error]))
+      payload = event.payload
+      name = 'PL/pgSQL Procedure call (%.1fms)' % event.duration
+      sql = payload[:sql].strip
+
+      if payload[:arguments].empty?
+        arguments = nil
+      elsif payload[:arguments].size == 1 && Hash === payload[:arguments].first
+        arguments = '  ' + payload[:arguments].first.inspect
+      else
+        arguments = '  ' + payload[:arguments].inspect
+      end
+
+      if event.payload[:error]
+        exception = "Error occurred: %s\n%s" %
+          [event.payload[:error].class, event.payload[:error].message.split("\n").map{|l| "  #{l}"}.join("\n")]
+
+        name = color(name, RED, bold: true)
+        exception = color(exception, RED, bold: true)
+        sql = color(sql, nil, bold: true)
+
+        error "  #{name}  #{sql}#{arguments}\n  #{exception}"
+      else
+        name = color(name, YELLOW, bold: true)
+        sql = color(sql, nil, bold: true)
+
+        debug "  #{name}  #{sql}#{arguments}"
+      end
+    end
+
+    private
+
+    def uncaught_exception?(error)
+      error && OCIError === error && !error.code.in?(20000..20999)
+    end
+
+    def logger
+      self.class.logger || super
+    end
+  end
+end
+
+PLPGSQL::LogSubscriber.attach_to :plpgsql

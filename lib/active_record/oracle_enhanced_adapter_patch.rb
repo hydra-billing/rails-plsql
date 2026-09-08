@@ -1,15 +1,16 @@
 require 'active_record/connection_adapters/oracle_enhanced_adapter'
 require 'plsql/pipelined_function'
 
+# ActiveRecord already carries #sql, #binds and #connection_pool; the only thing
+# missing is the driver exception that produced the error. Delegate everything
+# else to the framework rather than re-implementing its initializer, so the
+# `message || $!&.message` fallback and the connection_pool wiring keep working.
 class ActiveRecord::StatementInvalid
-  attr_reader :original_exception, :sql, :binds, :connection_pool
+  attr_reader :original_exception
 
-  def initialize(message = nil, original_exception = nil, sql: nil, binds: nil, connection_pool: nil)
-    super(message)
+  def initialize(message = nil, original_exception = nil, **kwargs)
+    super(message, **kwargs)
     @original_exception = original_exception
-    @sql = sql
-    @binds = binds
-    @connection_pool = connection_pool
   end
 end
 
@@ -72,17 +73,17 @@ module ActiveRecord
       protected
 
       def translate_exception(exception, message = nil, sql: nil, binds: nil, connection_pool: nil, **kwargs)
-        # Rails 7.2 adapter exposes _connection (private) which returns OCIConnection with error_code;
-        # older adapters used @connection ivar. _connection is private, so
-        # respond_to? needs the `true` flag to find it.
-        conn = if respond_to?(:_connection, true)
-          _connection
-        else
-          @connection
-        end
+        # oracle_enhanced exposes the OCI connection (which carries #error_code) as the
+        # private `_connection`; older adapters kept it in the @connection ivar.
+        # respond_to? needs the `true` flag to see a private method.
+        conn = respond_to?(:_connection, true) ? _connection : @connection
 
-        # Normalize message: positional arg (older Rails) OR keyword message (Rails 7.2)
+        # Rails 7.2 calls this with `message:` as a keyword; older versions passed it
+        # positionally.
         message ||= kwargs.delete(:message) || exception.message
+        # Rails 7.2 does not pass connection_pool to translate_exception - it hands the
+        # adapter's own pool to the error - so fall back to that rather than leaving nil.
+        connection_pool ||= @pool
 
         case conn.error_code(exception)
         when 1
