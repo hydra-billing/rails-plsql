@@ -1,9 +1,9 @@
-module PLSQL
+class PLPGSQL
   class LogSubscriber < ActiveSupport::LogSubscriber
     def procedure_call(event)
       return unless logger && (logger.debug? || uncaught_exception?(event.payload[:error]))
       payload = event.payload
-      name = 'PL/SQL Procedure call (%.1fms)' % event.duration
+      name = 'PL/pgSQL Procedure call (%.1fms)' % event.duration
       sql = payload[:sql].strip
 
       if payload[:arguments].empty?
@@ -43,4 +43,4 @@ module PLSQL
   end
 end
 
-PLSQL::LogSubscriber.attach_to :plsql
+PLPGSQL::LogSubscriber.attach_to :plpgsql

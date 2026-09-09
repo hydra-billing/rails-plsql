@@ -1,13 +1,4 @@
-module ActiveRecord::PLSQL
-  module AssociationRelation
-    def build_from
-      if klass.pipelined?
-        klass.arel_table
-      else
-        super
-      end
-    end
-  end
-end
-
-ActiveRecord::AssociationRelation.prepend(ActiveRecord::PLSQL::AssociationRelation)
+# Associations pointing at a pipelined model produce an AssociationRelation rather
+# than a PipelinedRelation, so the same query behaviour is prepended here.
+# PipelinedQueryMethods no-ops for any model that is not pipelined.
+ActiveRecord::AssociationRelation.prepend(ActiveRecord::PLSQL::PipelinedQueryMethods)
