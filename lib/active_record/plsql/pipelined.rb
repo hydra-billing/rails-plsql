@@ -75,7 +75,8 @@ module ActiveRecord::PLSQL
         if pipelined?
           @arel_table ||= Arel::Table.new(
             table_name_with_arguments,
-            as: pipelined_function_alias
+            as: pipelined_function_alias,
+            klass: self
           )
         else
           super
@@ -123,7 +124,7 @@ module ActiveRecord::PLSQL
 
       def relation
         return super unless pipelined?
-        @relation ||= PipelinedRelation.new(self, table: arel_table, predicate_builder: predicate_builder)
+        PipelinedRelation.new(self, table: arel_table, predicate_builder: predicate_builder)
       end
     end
 
@@ -134,23 +135,29 @@ module ActiveRecord::PLSQL
     def reload(options = nil)
       return super unless pipelined? && (found_by_arguments.present? || options)
 
-      clear_aggregation_cache
-      clear_association_cache
+      self.class.connection_pool.clear_query_cache
 
       fresh_object = self.class.unscoped do
         args = try_get_arguments(found_by_arguments).merge(options || {})
-        relation = self.class.where(
+        self.class.where(
           **args,
           self.class.primary_key => id,
-        )
-
-        relation.to_a[0]
+        ).to_a[0]
       end
 
-      @attributes = fresh_object.instance_variable_get("@attributes")
-      @new_record = false
+      unless fresh_object
+        raise ActiveRecord::RecordNotFound.new(
+          "Couldn't find #{self.class.name} with '#{self.class.primary_key}'=#{id.inspect}"
+        )
+      end
 
-      @changed_attributes = ActiveSupport::HashWithIndifferentAccess.new
+      @association_cache = fresh_object.instance_variable_get(:@association_cache)
+      @association_cache.each_value { |association| association.owner = self }
+      @attributes = fresh_object.instance_variable_get(:@attributes)
+      @new_record = false
+      @previously_new_record = false
+      @mutations_before_last_save = nil
+      @mutations_from_database = nil
       self
     end
 

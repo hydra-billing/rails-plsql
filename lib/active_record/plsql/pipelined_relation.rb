@@ -1,6 +1,9 @@
 module ActiveRecord::PLSQL
   class PipelinedRelation < ActiveRecord::Relation
-    include ActiveRecord::PLSQL::Pipelined::ClassMethods
+    # The query behaviour lives in PipelinedQueryMethods, shared with the module
+    # prepended onto AssociationRelation. Do NOT include Pipelined::ClassMethods here:
+    # its methods read @pipelined_function from the receiver, which is nil on a relation.
+    include PipelinedQueryMethods
 
     class FromClause < ActiveRecord::Relation::FromClause
       def initialize(value, name, binds = nil)
@@ -20,135 +23,40 @@ module ActiveRecord::PLSQL
 
     attr_accessor :pipelined_arguments_values
 
-    def where(opts, *rest)
-      return super unless @klass.pipelined? && pipelined_arguments.any?
-
-      pipelined_args = pipelined_arguments_names.map(&:to_sym)
-      normalized_opts = normalize_arguments_conditions(opts, pipelined_args)
-      return super if normalized_opts.empty?
-
-      pipelined_binds = get_pipelined_arguments(table_binds, normalized_opts)
-      where_opts = normalized_opts.reject { |k| pipelined_args.include?(k) }
-
-      rel = spawn.from!(
-        table_name_with_arguments,
-        pipelined_function_alias.to_sym,
-        pipelined_binds
-      )
-
-      if where_opts.empty? && rest.empty?
-        rel
-      elsif where_opts.empty?
-        rel.where!(*rest)
-      elsif where_opts.is_a?(Array)
-        rel.where!(*where_opts, *rest)
-      else
-        rel.where!(where_opts, *rest)
-      end
+    def pipelined?
+      klass.pipelined?
     end
 
-    def where!(opts, *rest)
-      return super unless @klass.pipelined? && pipelined_arguments.any?
-
-      pipelined_args = pipelined_arguments_names.map(&:to_sym)
-      normalized_opts = normalize_arguments_conditions(opts, pipelined_args)
-      return super if normalized_opts.empty?
-
-      pipelined_binds = get_pipelined_arguments(table_binds, normalized_opts)
-      where_opts = normalized_opts.reject { |k| pipelined_args.include?(k) }
-
-      from!(
-        table_name_with_arguments,
-        pipelined_function_alias.to_sym,
-        pipelined_binds
-      )
-
-      if where_opts.empty? && rest.empty?
-        self
-      elsif where_opts.empty?
-        super(*rest)
-      else
-        super(where_opts, *rest)
-      end
-    end
-
-    def get_pipelined_arguments(current, values)
-      if values.is_a?(Hash)
-        pipelined_arguments_names.map do |name|
-          ActiveRecord::Attribute.with_cast_value(
-            name,
-            values.fetch(name.to_sym) {
-              cur = current.find { |arg| arg.name.to_sym == name.to_sym }
-              cur ? cur.value : nil
-            },
-            ActiveRecord::Type.default_value
-          )
-        end
-      else
-        current
-      end
-    end
-
-    def table_binds
-      if from_clause.is_a?(FromClause)
-        from_clause.table_binds
-      else
-        []
-      end
-    end
-
-    def build_from
-      if @klass.pipelined?
-        @klass.arel_table
-      else
-        super
-      end
+    def pipelined_function
+      klass.pipelined_function
     end
 
     def table
-      if @klass.pipelined?
-        @klass.arel_table
+      if klass.pipelined?
+        klass.arel_table
       else
         super
       end
     end
 
-    def from!(value, subquery_name = nil, binds = nil) # :nodoc:
-      self.from_clause = FromClause.new(value, subquery_name, binds)
-      self
-    end
-
-    def exec_queries
-      return super unless @klass.pipelined? && !pipelined_arguments.empty?
-      return @records if loaded?
-      super
-      return @records if @records.empty?
-
-      # save arguments for easy reloading
-      @records.each { |record| record.found_by_arguments = table_binds }
-      @records
-    end
-
-    protected
-
-    def normalize_arguments_conditions(opts, args)
-      case opts
-      when Hash
-        if opts.key?(klass.pipelined_function_name)
-          opts[klass.pipelined_function_name].symbolize_keys
-        else
-          opts.symbolize_keys
-        end
-      when Arel::Nodes::Equality
-        column = opts.left.name.to_sym
-
-        # only simple types for now
-        if args.include?(column) && !opts.right.is_a?(Arel::Attributes::Attribute)
-          { column => opts.right }
-        end
-      else
-        [opts]
+    # Build an Arel::Table with a BoundSqlLiteral that embeds FROM binds
+    # into the Arel AST so Rails 7.2 compiled binds include pipelined function arguments.
+    def self.bound_table_for_pipelined(klass, binds)
+      named_binds = {}
+      klass.pipelined_arguments_names.each_with_index do |name, i|
+        named_binds[name.to_sym] = binds[i] if i < binds.length
       end
+      sql = klass.table_name_with_arguments
+      bound_literal = Arel::Nodes::BoundSqlLiteral.new(sql, nil, named_binds)
+      Arel::Table.new(bound_literal, as: klass.pipelined_function_alias, klass: klass)
     end
   end
+end
+
+# PipelinedRelation is instantiated directly instead of through
+# Delegation#relation_class_for, so it never gets the per-model delegate class that
+# Rails builds for ordinary relations. Without this, model scopes and class methods
+# are not reachable from a pipelined relation.
+unless ActiveRecord::PLSQL::PipelinedRelation < ActiveRecord::Delegation::ClassSpecificRelation
+  ActiveRecord::PLSQL::PipelinedRelation.include(ActiveRecord::Delegation::ClassSpecificRelation)
 end
